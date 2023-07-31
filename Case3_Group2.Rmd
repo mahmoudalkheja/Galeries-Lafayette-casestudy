@@ -1,0 +1,1069 @@
+---
+title: "Case3 Galferie lafayette"
+author: "Raiyan Puntel and Mahmoud Alkheja"
+date: "2023-04-11"
+output:
+  html_document:
+    toc: true
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls()) #Clean the entire environment
+cat("\014") # clean console
+```
+
+### Loading libraries and Reading the data set:
+
+```{r echo=TRUE, message=FALSE}
+## set library
+library(lavaan) 
+library(semPlot) #for visualization
+library(knitr)
+library(dplyr)
+library(lavaanPlot)
+library(lm.beta)
+library(rcompanion)   #Histogram and Normal Curve
+library(nortest)      #Kolmogorov-Smirnov-Test
+library(corrplot)     #correlation matrix plot
+library(olsrr)        #VIF and Tolerance Values
+library(pastecs)
+library(REdaS)        #Bartelett's Test
+library(psych)        # principal axis factoring 
+library(naniar)       # for missing values analysis
+library(RColorBrewer)
+library(ggcorrplot)
+library(psy)
+```
+
+```{r,warning=FALSE,message=FALSE}
+setwd("/Users/mahmoudalkheja/Desktop/Advanced Data Driven Decision Making/Case Study III-20230420")
+myData <- read.csv("Case Study III_Structural Equation Modeling.csv")
+explanation <- read.csv("Variables and Labels_Galeries Lafayette.csv")
+
+```
+
+```{r}
+myData =data.frame(sapply(myData,function(x) ifelse((x==999),NA,as.numeric(x))))
+
+```
+
+Change 999 in the Data-set to NA's:
+
+# Exploratory factor analyses
+
+**Conducting the confirmatory factor analyses run an exploratory factor analyses in R to get an initial idea by which dimensions customers perceive Gallerias Lafayette. In the file all 22 image items are proposed to measure different constructs or perceptual dimensions**
+
+### Explore the data
+
+```{r}
+head(myData)
+summary(myData)
+dim(myData)
+
+```
+
+Our dataset consists of 553 observations and 45 features, but it exhibits missing values in certain portions.
+Additionally, all questions (Image 1 to 22) in the dataset have been scaled on a 7-point scale.
+
+```{r}
+gg_miss_var(myData)
+```
+
+For **exploratory factor analysis**: we only consider variables image1 to image22, and we will use listwise deletion to handle missing data before starting.
+
+```{r}
+image <- myData[,c(1:22)]
+miss_var_summary(image)
+image <- na.omit(image)
+dim(image)
+```
+
+385 observation after removing the missing values.
+
+### **Normality assumption**
+
+```{r}
+# histograms 
+par(mfrow = c(3, 3))
+for (i in colnames(image)) {
+  plotNormalHistogram(image[,i], main = paste("Frequency Distribution of", i))
+}
+```
+
+```{r}
+lillie.test(image$Im1)   # Kolmogorov-Smirnov-Test for normality 
+lillie.test(image$Im22)   # Kolmogorov-Smirnov-Test for normality 
+```
+
+Upon examining the histograms of the data, it appears that the normality assumption is not met.
+Specifically, the Kolmogorov-Smirnov test for normality on samples (Im1, Im22) yielded a small p-value, indicating that the null hypothesis that the sample comes from a normal distribution can be rejected.
+
+### Correlation matrix:
+
+```{r}
+Matrix = cor(image, use="complete.obs") #We create a matrix.
+ggcorrplot(round(as.matrix(Matrix), 2),
+           method = "square", 
+           type = "lower", 
+           show.diag = FALSE,
+           lab = TRUE, lab_col = "black", hc.order = T, lab_size = 2)
+```
+
+Given that most of the correlation coefficients among the variables exceed 0.3, it appears that there is a significant degree of correlation between the variables.
+As a result, factor analysis can be an appropriate method to extract underlying factors from these correlated variables.
+
+### **Check adequacy of correlation matrix.**
+
+```{r}
+KMOTEST=KMOS(image)
+KMOTEST
+
+sort(KMOTEST$MSA)
+```
+
+KMO ( Kaiser-Meyer-Olkin ) test gives us a KMO - criterion of 0.88 which is good we need more than 0.6 for a good factor analysis.
+We see no gap between the variables they are all very close in KMO.
+
+```{r}
+bart_spher(image)
+```
+
+In the Bartlett's Test of Sphericity the small p_value indicate strong evidence against the null hypothesis that CM equals to identity matrix in other word indicating that the variables in the data set are significantly correlated
+
+### **Principal axes factoring**
+
+```{r}
+# Run factor analysis with no rotation
+# ?fa  # details on the function
+
+fa_0 <- fa(image, 
+           nfactors = ncol(image), 
+           rotate = "none")
+
+# Look at communalities
+sort(fa_0$communalities)
+```
+
+```{r}
+total_var_explained_paf <- data.frame(
+  Factor_n = as.factor(1:length(fa_0$e.values)), 
+  Eigenvalue = fa_0$e.values,
+  Variance = fa_0$e.values/(ncol(image))*100,
+  Cum_var = cumsum(fa_0$e.values/ncol(image))
+  )
+total_var_explained_paf
+```
+
+The first factor explains 40.80% of the total variance, indicating a relatively strong ability to capture the underlying structure of the data.
+Additionally, the first six factors have Eigenvalues greater than 1, collectively accounting for 76.64% of the total variance.
+However, the seventh and the eighth factors have an Eigenvalue less than 1.
+BY adding them the explained total variance will be 83.54%.
+
+```{r}
+# Scree plot
+ggplot(total_var_explained_paf, aes(x = Factor_n, y = Eigenvalue, group = 1)) + 
+  geom_point() + geom_line() +
+  xlab("Number of factors") +
+  ylab("Initial eigenvalue") +
+  labs( title = "Scree Plot") +
+  geom_hline(yintercept= 1, linetype="dashed", color = "red")
+```
+
+According to the Kaiser criterion, we should extract factors with eigenvalues larger than 1, which would suggest retaining six factors.
+However, it is worth noting that the eigenvalue for the 7th factor is close to 1.
+
+**Factor rotation and factor interpretation.**
+
+```{r}
+fa_paf_6f <- fa(
+  image,
+  fm = "pa",              # principal axis factoring
+  rotate = "varimax",     # varimax rotation
+  nfactors = 6            # 6 factors
+  )
+```
+
+```{r}
+communalities_6f <- data.frame(sort(fa_paf_6f$communality))
+communalities_6f
+```
+
+```{r}
+print(fa_paf_6f$loadings, cutoff=0.3, sort = TRUE)
+```
+
+Based on the loadings of the variables and their relationship to the factors, it appears that the 6-factor model does not fit the data well.
+Many variables seem to have loadings on multiple factors such as lm 17 and lm9, which can indicate a lack of discriminant validity.
+Therefore, it may be necessary to explore other solutions.
+
+One possible solution is to consider a 7-factor model, as suggested by the Kaiser criterion.
+This would involve extracting an additional factor and re-analyzing the data to assess the fit of the model.
+
+```{r}
+fa_paf_7f <- fa(
+  image,
+  fm = "pa",              # principal axis factoring
+  rotate = "varimax",     # varimax rotation
+  nfactors = 7            # 7 factors
+  )
+```
+
+```{r}
+communalities_7f <- data.frame(sort(fa_paf_7f$communality),
+                               sort(fa_paf_6f$communality))
+communalities_7f
+```
+
+```{r}
+print(fa_paf_7f$loadings, cutoff=0.3, sort=TRUE)
+```
+
+After implementing a 7-factor model, it appears that the results have improved.
+However, there are still some variables that have loadings on multiple factors such as lm 8,lm 16 and lm 19, which suggests a lack of discriminant validity.
+Additionally, there are some variables with low loading values such as lm15 and lm 11, indicating that they may not be contributing much to the underlying factors.
+Let's try to interpret the results :
+
+1)  What do GLB represent from your point of view?
+    Large Assortment
+
+2)  What do GLB represent from your point of view?
+    Assortment Variety
+
+3)  What do GLB represent from your point of view?
+    Artistic Decoration of Sales Area
+
+4)  What do GLB represent from your point of view?
+    Creative Decoration of Sales Area
+
+5)  What do GLB represent from your point of view?
+    Appealing Arrangement of Shop Windows
+
+6)  What do GLB represent from your point of view?
+    France
+
+7)  What do GLB represent from your point of view?
+    French Savoir-vivre
+
+8)  What do GLB represent from your point of view?
+    Expertise in French Traditional Cuisine
+
+9)  What do GLB represent from your point of view?
+    French Fashion
+
+10) What do GLB represent from your point of view?
+    Gourmet Food
+
+11) What do GLB represent from your point of view?
+    High-quality Cosmetics
+
+12) What do GLB represent from your point of view?
+    Luxury brands
+
+13) What do GLB represent from your point of view?
+    Up to date Designer Brands
+
+14) What do GLB represent from your point of view?
+    Gourmet specialties
+
+15) What do GLB represent from your point of view?
+    Professional Selection of Brands
+
+16) What do GLB represent from your point of view?
+    Professional Appearance Towards Customers
+
+17) What do GLB represent from your point of view?
+    Are Trendy
+
+18) What do GLB represent from your point of view?
+    Are Hip
+
+19) What do GLB represent from your point of view?
+    Professional Organization
+
+20) What do GLB represent from your point of view?
+    Relaxing Shopping
+
+21) What do GLB represent from your point of view?
+    A Great Place to Stroll
+
+22) What do GLB represent from your point of view?
+    Intimate Shop Atmosphere
+
+**Factors interpretation**
+
+-   PA5 -\> 1,2,15,16,19 --\> Variety ( Im15 has a low loading seem to be not relevant and more about professional,lm16 and lm19 have loadings on PA1 as well and it is about professiona)
+
+-   PA1 --\> 3,4,5,16,19 --\> Decoration
+
+-   PA3 --\> 20,21,22 --\> Atmosphere or Ambiance
+
+-   PA2 --\> 8,10,14 --\> Food or Cuisine ( Im 8 has as well a loading on factor 7 )
+
+-   PA4 --\> 9,11,12,13 --\> Brand (Im11 has a low loading )
+
+-   PA7 --\>6-7-8-9 --\>Related to France (lm8 and lm9 have loadings on other factors)
+
+-   PA6 --\> 17 , 18 --\> Fashion or mode.
+
+```{r}
+fa_paf_8f <- fa(
+  image,
+  fm = "pa",              # principal axis factoring
+  rotate = "varimax",     # varimax rotation
+  nfactors = 8            # 8 factors
+  )
+```
+
+```{r}
+communalities_8f <- data.frame(sort(fa_paf_8f$communality),
+                               sort(fa_paf_7f$communality),
+                               sort(fa_paf_6f$communality))
+communalities_8f
+```
+
+```{r}
+print(fa_paf_8f$loadings, cutoff=0.3, sort=TRUE)
+```
+
+Based on our initial analysis, an 8-factor solution appears to be a good fit for our data.
+However, to further refine our results, we will re-do the analysis after removing variables 8,9 and 15 since they have low loading on two factors.
+
+```{r}
+fa_paf_8f_n <- fa(
+  image[,-c(8,9,15)],
+  fm = "pa",              # principal axis factoring
+  rotate = "varimax",     # varimax rotation
+  nfactors = 8            # 8 factors
+  )
+```
+
+```{r}
+communalities_8f_n <- data.frame(sort(fa_paf_8f_n$communality))
+                            
+communalities_8f_n
+```
+
+```{r}
+print(fa_paf_8f_n$loadings, cutoff=0.3, sort=TRUE)
+```
+
+```{r}
+fa.diagram(fa_paf_8f_n)
+```
+
+**Factors interpretation**
+
+-   PA1 --\> 3,4,5 --\> Decoration
+
+-   PA3 --\> 20,21,22 --\> Atmosphere or Ambiance
+
+-   PA4 --\> 11,12,13 --\> Brand
+
+-   PA5 -\> 1,2 --\> Variety
+
+-   PA2 --\> 10,14 --\> Food or Cuisine
+
+-   PA7 --\> 6-7 --\> Related to France
+
+-   PA6 -\> 17-18 -\>Fashion or Mode
+
+-   PA8 -\> 16-19 -\>Professionalism
+
+### PCA
+
+```{r}
+# run factor analysis
+fa_pca <- principal(
+  image, 
+  rotate="none", 
+  scores=TRUE)
+
+# data frame with eigenvalues
+pca <- data.frame(
+  Factor_n =  as.factor(1:length(fa_pca$values)), 
+  Eigenvalue_PCA = fa_pca$values,
+  Eigenvalue_PAF = fa_0 $e.values
+  )
+pca
+```
+
+The eigenvalues obtained from performing PAF and PCA factor analyses exhibit a high degree of similarity and often yield identical results.
+This is a common occurrence in these types of analyses.
+
+```{r}
+fa_pca_7f <- principal(
+  nfactors = 7,
+  image, 
+  rotate="varimax", 
+  scores=TRUE           # If TRUE, find component scores
+  )
+
+pca_communalities_7f <- data.frame(fa_pca_7f$communality,
+                                   fa_paf_7f$communality)
+pca_communalities_7f
+```
+
+As expected, PCA often yields higher communalities estimates than PAF.
+
+```{r}
+print(fa_pca_7f$loadings, cutoff=0.3, sort=TRUE)
+```
+
+Same results from PAF .
+After implementing a 7-factor model, there are still some variables that have loadings on multiple factors such as lm 8,lm 16 and lm 19, thus we will try with 8 factors :
+
+```{r}
+fa_pca_8f <- principal(
+  nfactors = 8,
+  image, 
+  rotate="varimax", 
+  scores=TRUE           # If TRUE, find component scores
+  )
+
+pca_communalities_8f <- data.frame(fa_pca_8f$communality,
+                                   fa_paf_8f$communality)
+pca_communalities_8f
+```
+
+```{r}
+print(fa_pca_8f$loadings, cutoff=0.3, sort=TRUE)
+```
+
+8-factor solution appears to be a good fit for our data.
+However, to further refine our results, we will re-do the analysis after removing variables 8,9 and 15 since they have low loading on two factors.
+
+```{r}
+
+fa_pca_8f_n <- principal(
+  nfactors = 8,
+  image[,-c(8,9,15)], 
+  rotate="varimax", 
+  scores=TRUE           # If TRUE, find component scores
+  )
+
+pca_communalities_8f_n <- data.frame(fa_pca_8f_n$communality,
+                                   fa_paf_8f_n$communality)
+pca_communalities_8f_n
+```
+
+```{r}
+print(fa_pca_8f_n$loadings, cutoff=0.3, sort=TRUE)
+```
+
+**Factors interpretation**
+
+1)  What do GLB represent from your point of view?
+    Large Assortment
+
+2)  What do GLB represent from your point of view?
+    Assortment Variety
+
+3)  What do GLB represent from your point of view?
+    Artistic Decoration of Sales Area
+
+4)  What do GLB represent from your point of view?
+    Creative Decoration of Sales Area
+
+5)  What do GLB represent from your point of view?
+    Appealing Arrangement of Shop Windows
+
+6)  What do GLB represent from your point of view?
+    France
+
+7)  What do GLB represent from your point of view?
+    French Savoir-vivre
+
+8)  What do GLB represent from your point of view?
+    Expertise in French Traditional Cuisine
+
+9)  What do GLB represent from your point of view?
+    French Fashion
+
+10) What do GLB represent from your point of view?
+    Gourmet Food
+
+11) What do GLB represent from your point of view?
+    High-quality Cosmetics
+
+12) What do GLB represent from your point of view?
+    Luxury brands
+
+13) What do GLB represent from your point of view?
+    Up to date Designer Brands
+
+14) What do GLB represent from your point of view?
+    Gourmet specialties
+
+15) What do GLB represent from your point of view?
+    Professional Selection of Brands
+
+16) What do GLB represent from your point of view?
+    Professional Appearance Towards Customers
+
+17) What do GLB represent from your point of view?
+    Are Trendy
+
+18) What do GLB represent from your point of view?
+    Are Hip
+
+19) What do GLB represent from your point of view?
+    Professional Organization
+
+20) What do GLB represent from your point of view?
+    Relaxing Shopping
+
+21) What do GLB represent from your point of view?
+    A Great Place to Stroll
+
+22) What do GLB represent from your point of view?
+    Intimate Shop Atmosphere
+
+**PFA**
+
+-   RC1 --\> 3,4,5 --\> Decoration
+
+-   RC3 --\> 20,21,22 --\> Atmosphere or Ambiance
+
+-   RC4 --\> 11,12,13 --\> Brand
+
+-   RC5 -\> 1,2 --\> Variety
+
+-   RC2 --\> 10,14 --\> Food or Cuisine
+
+-   RC8 --\> 6-7 --\> Related to France
+
+-   RC6 -\> 17-18 -\>Fashion or Mode
+
+-   RC7 -\> 16-19 -\>Professionalism
+
+**PC**
+
+-   PA1 --\> 3,4,5 --\> Decoration
+
+-   PA3 --\> 20,21,22 --\> Atmosphere or Ambiance
+
+-   PA4 --\> 11,12,13 --\> Brand
+
+-   PA5 -\> 1,2 --\> Variety
+
+-   PA2 --\> 10,14 --\> Food or Cuisine
+
+-   PA7 --\> 6-7 --\> Related to France
+
+-   PA6 -\> 17-18 -\>Fashion or Mode
+
+-   PA8 -\> 16-19 -\>Professionalism
+
+# Question 1
+
+**What are the dimensions by which Galeries Lafayette is perceived? Please explain your findings and rational for your final result.**
+
+### **Confirmatory Factor Analysis**
+
+```{r}
+model <- "
+decoration=~ Im3+Im4+Im5
+atmosphere=~ Im20+Im21+Im22
+brand=~ Im11+Im12+Im13
+variety=~ Im1 + Im2
+cuisine=~ Im10+ Im14
+france=~ Im6 + Im7
+mode=~ Im17 + Im18
+professionalism =~ Im16+ Im19"
+
+fit <- cfa(model, myData, missing="ML")
+ summary(fit, fit.measures=TRUE,standardized=TRUE)
+```
+
+### Results
+
+To evaluate whether our model is good or not, we will check the fit measures.
+The first global fit measure we will consider is the Chi-squared test.
+According to slide 68 of our course, a low Chi2-value (considering degrees of freedom) indicates a good fit, and the ratio of Chi2-value/df should be below 5 for samples up to 1000.
+Since we have 553 observations, we calculate the ratio as 259.047/124 = 2.089089, which is below 5.
+Therefore, our Chi-squared test result is good.
+
+Moving on to the second fit measure, according to slide 69 of our course, we need a Root Mean Square Error of Approximation (RMSEA) below 0.05 to have a good model.
+In our case, the RMSEA is 0.044, and the robust RMSEA is 0.045, indicating that we have a good model.
+
+Finally, we will check the Comparative Fit Index (CFI) which is the last fit measure from slide 70 of our course.
+A CFI above 0.95 indicates a good model.
+In our case, we have a CFI of 0.982, which is above the required threshold, indicating a good model.
+
+Based on these fit measures, we can conclude that our factor analysis was good for our model.
+
+```{r}
+parameterestimates(fit, boot.ci.type = "bca.simple", standardized = TRUE)%>% kable()
+```
+
+We can observe that all values are significant.
+During class, we learned that upper and lower case should not include 0, except for IM 1 and IM 7 in relation to themselves.
+Despite this exception, the results are still satisfactory.
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im3,Im4,Im5)))
+CronReli
+
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im20,Im21,Im22)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im11,Im12,Im13)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im1,Im2)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im10,Im14)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im6,Im7)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im17,Im18)))
+CronReli
+```
+
+```{r}
+#calculating reliability
+CronReli=cronbach(subset(myData, select = c(Im16,Im19)))
+CronReli
+```
+
+All of Cronbach's alpha greater than 0.7 indicating that the observed variables have sufficient reliability
+
+```{r}
+std_fit=inspect(fit, "std")
+std_fit$psi
+```
+
+some comment on covariances include:
+
+-   decoration and professionalism (0.653): This suggests a strong positive relationship between these two factors, meaning that as the decoration quality increases, professionalism is also likely to increase.
+
+-   cuisine and atmosphere (0.295): This suggests a relatively weak positive relationship between these two factors, meaning that the quality of the cuisine is not strongly related to the atmosphere of the establishment.
+
+    \
+
+```{r}
+std_fit$lambda
+```
+
+Each construct has loadings greater than 0.7 except for Im11, indicating that at least 50% of the variance in each indicator is explained by the underlying construct.
+
+```{r}
+std_fit$theta
+```
+
+From theta matrix we can see that the diagonal values range from 0.040(IM1) to 0.622(Im11).
+Lower values indicate that the latent factors account for a larger proportion of the variance in the observed variables, while higher values suggest that the latent factors explain less of the variance in the observed variables
+
+```{r}
+modificationindices(fit) %>% filter(mi>10)
+```
+
+Since we do not have a Large Modification Indices (mi) that indicate that we have a good model.
+
+# Question 2
+
+**Are the mechanism driving satisfaction and affective commitment similar? Are satisfaction and affective commitment mediating the impact of image perceptions on outcomes? If yes for which outcomes?**
+
+To create a structural equation model, we need to consider the relationships between the observed variables and latent variables based on the known structure:
+
+Images → Mediators → Outcomes
+
+For this model, we have:
+
+1.  Images: The 8 dimensions found previously.
+
+2.  Mediators: Affective Commitment (with COM_A1 -- COM_A4) and Customer Satisfaction (with SAT_1 -- SAT_3).
+
+3.  Outcomes: Repurchase Intention (with C_REP1 -- C_REP3) and Co-creation (with C_CR1, C_CR3, C_CR4).
+
+Now let's define the model:
+
+1.  Images: These are the 8 dimensions we identified earlier, which serve as the predictor variables in our model.
+
+2.  Mediators:
+
+    -   Affective Commitment (AC) =\~ COM_A1 + COM_A2 + COM_A3 + COM_A4
+
+    -   Customer Satisfaction (CS) =\~ SAT_1 + SAT_2 + SAT_3
+
+3.  Outcomes:
+
+    -   Repurchase Intention (RI) =\~ C_REP1 + C_REP2 + C_REP3
+
+    -   Co-creation (CC) =\~ C_CR1 + C_CR3 + C_CR4
+
+### Model
+
+```{r}
+model1 <- "
+# measurement model (=~)
+decoration=~ Im3+Im4+Im5
+atmosphere=~ Im20+Im21+Im22
+brand=~ Im11+Im12+Im13
+variety=~ Im1 + Im2
+cuisine=~ Im10+ Im14
+france=~ Im6 + Im7
+mode=~ Im17 + Im18
+professionalism =~ Im16+ Im19
+
+  satisfaction =~ SAT_1 + SAT_2 + SAT_3
+  commitment =~ COM_A1 + COM_A2 + COM_A3 + COM_A4
+  cocreation =~ C_CR1 + C_CR3 + C_CR4
+  repurchase =~ C_REP1 + C_REP2 + C_REP3
+
+# Structural model ( ~)
+cocreation ~ a * satisfaction + b * commitment
+repurchase ~ c * satisfaction + d * commitment 
+
+satisfaction ~ e * professionalism + f * mode + g * france + h * cuisine + i * variety + j * brand + k * atmosphere + l * decoration
+commitment ~ m * professionalism + n * mode + o * france + p * cuisine + q * variety + r * brand + s * atmosphere + t * decoration
+
+cocreation ~ u * professionalism + v * mode + w * france + x * cuisine + y * variety + z * brand+ aa * atmosphere + bb * decoration
+repurchase ~  cc * professionalism + dd * mode + ee * france + ff * cuisine + gg * variety + hh * brand + ii * atmosphere + jj * decoration
+
+
+# indirect effect (:=)
+# for cocreation: 
+  ae:=a*e
+  af:=a*f
+  ag:=a*g
+  ah:=a*h
+  ai:=a*i
+  aj:=a*j
+  ak:=a*k
+  al:=a*l
+  
+  bm:=b*m
+  bn:=b*n
+  bo:=b*o
+  bp:=b*p
+  bq:=b*q
+  br:=b*r
+  bs:=b*s
+  bt:=b*t
+  
+# for repurchase
+
+  ce:=c*e
+  cf:=c*f
+  cg:=c*g
+  ch:=c*h
+  ci:=c*i
+  cj:=c*j
+  ck:=c*k
+  cl:=c*l
+  
+  dm:=d*m
+  dn:=d*n
+  do:=d*o
+  dp:=d*p
+  dq:=d*q
+  dr:=d*r
+  ds:=d*s
+  dt:=d*t
+  
+# Total effects ( := TE)
+# for cocreation
+TE1C:= u + (a*e) + (b*m)
+TE2C:= v + (a*f) + (b*n)
+TE3C:= w + (a*g) + (b*o)
+TE4C:= x + (a*h) + (b*p)
+TE5C:= y + (a*i) + (b*q)
+TE6C:= z + (a*j) + (b*r)
+TE7C:= aa + (a*k) + (b*s)
+TE8C:= bb + (a*l) + (b*t)
+
+# for repurchase 
+TE1R:= cc + (c*e) + (d*m)
+TE2R:= dd + (c*f) + (d*n)
+TE3R:= ee + (c*g) + (d*o)
+TE4R:= ff + (c*h) + (d*p)
+TE5R:= gg + (c*i) + (d*q)
+TE6R:= hh + (c*j) + (d*r)
+TE7R:= ii + (c*k) + (d*s)
+TE8R:= jj + (c*l) + (d*t)
+
+# total indirect effect
+# for cocreation 
+TIE1C:=  (a*e) + (b*m)
+TIE2C:=  (a*f) + (b*n)
+TIE3C:=  (a*g) + (b*o)
+TIE4C:=  (a*h) + (b*p)
+TIE5C:=  (a*i) + (b*q)
+TIE6C:=  (a*j) + (b*r)
+TIE7C:=  (a*k) + (b*s)
+TIE8C:=  (a*l) + (b*t)
+
+# for repurchase 
+TIE1R:=  (c*e) + (d*m)
+TIE2R:=  (c*f) + (d*n)
+TIE3R:=  (c*g) + (d*o)
+TIE4R:=  (c*h) + (d*p)
+TIE5R:=  (c*i) + (d*q)
+TIE6R:=  (c*j) + (d*r)
+TIE7R:=  (c*k) + (d*s)
+TIE8R:=  (c*l) + (d*t)
+
+"
+fit1<-cfa(model1, data=myData,estimator="MLR", missing="ML")
+
+summary(fit1, fit.measures=TRUE,standardized=TRUE)
+```
+
+-   Latent Variables standardized loading : indicates the variance in the item explained through the contracts all are above 0.6 .
+
+### Global fit :
+
+```{r}
+Sum_fit = summary(fit1, fit.measures=TRUE,standardized=TRUE)
+Sum_fit$fit[c("chisq","df","rmsea","cfi")]
+```
+
+Before examining the individual parameters, it is important to first assess the overall goodness of fit for the model.
+There are several criteria we can use to evaluate the global fit:
+
+1.  Chi-squared test: A low Chi-squared value, considering the degrees of freedom, indicates a good fit.
+    The ratio of the Chi-squared value to the degrees of freedom should be below 5 for samples up to 1000.
+    In this case, with 553 observations, we calculate the scaled measure as 632.247 / 399 = 1.584579 and the standard measure as 700.455 / 399 = 1.755526.
+    Both ratios are below 5, indicating a good fit according to the Chi-squared test.
+
+2.  Root Mean Square Error of Approximation (RMSEA): A RMSEA value below 0.05 indicates a good model fit.
+    In this case, we have an RMSEA of 0.037 and a Robust RMSEA of 0.034, which are both below the 0.05 threshold, suggesting that the model has a good fit based on RMSEA.
+
+3.  Comparative Fit Index (CFI): A CFI value above 0.95 indicates a good model fit.
+    In this case, we have a CFI of 0.974, which is above the threshold, indicating a good fit based on CFI.
+
+Given that the global fit measures meet the criteria for goodness of fit, we can conclude that the model is well-fitted.
+With a well-fitted model, we can proceed to analyze the individual parameter estimates with confidence.
+
+```{r}
+modificationindices(fit1) %>%filter(mi>10)
+```
+
+### Local Fit Measures
+
+```{r}
+#Local Fit
+
+std.loadings <- inspect(fit1, what="std")$lambda
+check = std.loadings
+check[check > 0] <- 1
+std.loadings[std.loadings == 0] <- NA
+std.loadings2 <- std.loadings^2
+std.theta <- inspect(fit1, what="std")$theta
+
+#Individual item Reliability
+IIR=std.loadings2/(colSums(std.theta) + std.loadings2)
+IIR
+```
+
+-   All of them greater than 0.4 except for SAT_3 -SATISFACTION - How satisfied are you with Galeries Lafayette Berlin? suggest that the item is a weak indicator.
+
+```{r}
+#Composite/Construct Reliability
+sum.std.loadings<-colSums(std.loadings, na.rm=TRUE)^2
+sum.std.theta<-rowSums(std.theta)
+sum.std.theta=check*sum.std.theta
+CR=sum.std.loadings/(sum.std.loadings+colSums(sum.std.theta))
+CR
+```
+
+-   Should be above 0.6 ,indicating that the items are reliable and consistently measuring the underlying construct.
+
+```{r}
+#Average Variance Extracted 
+std.loadings<- inspect(fit1, what="std")$lambda
+std.loadings <- std.loadings^2
+AVE=colSums(std.loadings)/(colSums(sum.std.theta)+colSums(std.loadings))
+AVE
+```
+
+-   Should be higher than 0.5 , it is a measure of the amount of variance captured by a latent variable relative to the total variance due to measurement error
+
+```{r}
+# Discriminant Validity 
+std_fit1=inspect(fit1, "std")
+std_fit1$psi^2
+```
+
+-   It is important to compare these values to the AVE values to assess the discriminant validity of the measurement model. Discriminant validity is established when the AVE value for each latent variable is greater than the squared correlation between that latent variable and any other latent variable in the model. For example: For decoration and atmosphere, the squared correlation is 0.218 \< AVE decoration and atmosphere are 0.798 and 0.699, respectively, discriminant validity is established between these two latent variables.
+
+### Plot the results:
+
+```{r}
+semPaths(fit1, nCharNodes = 0, style = "lisrel", rotation = 2)
+```
+
+## Are the mechanism driving satisfaction and affective commitment similar?
+
+![](images/GSEM_AD3M_2023_Case%20Study_Galeries%20Lafayette-8.jpg)
+
+Indeed, the mechanisms driving satisfaction and affective commitment are not similar.
+Here's a summary of the differences:
+
+Mechanisms driving satisfaction:
+
+1.  Professionalism (e): Positive coefficient indicates that it has a positive impact on satisfaction.
+
+2.  Variety (i): Positive coefficient indicates that it has a positive impact on satisfaction.
+
+3.  Decoration (l): Negative coefficient indicates that it has a negative impact on satisfaction.
+
+Mechanisms driving affective commitment:
+
+1.  France (o): Positive coefficient indicates that it has a positive impact on affective commitment.
+
+2.  Atmosphere (s): Positive coefficient indicates that it has a positive impact on affective commitment.
+
+As we can see, the factors affecting satisfaction and affective commitment are different, and their respective impacts on these outcomes also vary.
+This highlights the distinct mechanisms driving satisfaction and affective commitment in Galeries Lafayetteperceived.
+
+\
+On the other hand, we can observe that satisfaction has a negative coefficient on co-creation, which implies that the more satisfied clients are, the less likely they are to participate in campaigns to improve Galeries Lafayette.
+In contrast, affective commitment has a positive relationship with co-creation, meaning that customers with higher affective commitment are more likely to participate in such campaigns.
+
+Additionally, both affective commitment and satisfaction have a positive effect on repurchase intention from Galeries Lafayette.
+This indicates that clients who are more satisfied and have a stronger emotional attachment to the brand are more likely to return for future purchases.
+
+## Are satisfaction and affective commitment mediating the impact of image perceptions on outcomes? If yes for which outcomes?
+
+In the regression analysis, we find that none of the eight factors have a direct effect on co-creation or repurchase intentions, as none of them show significant p-values:
+
+-   Co-creation \~ all eight factors
+
+-   Repurchase \~ all eight factors
+
+    ![](images/GSEM_AD3M_2023_Case%20Study_Galeries%20Lafayette-9.jpg)
+
+However, we do observe indirect effects where satisfaction and affective commitment mediate the impact of image perceptions on these outcomes.
+We can identify significant indirect effects by examining the defined parameters:
+
+1.  For 'a' (satisfaction on co-creation ), we have:
+
+-   ae: 'a' represents satisfaction (in the co-creation regression) and 'e' for professionalism, satisfaction mediates the impact of professionalism on co-creation
+
+    -   Professionalism → Satisfaction ( mediator )→ Co-creation
+
+-   ai: 'a' represents satisfaction and 'i' for variety, satisfaction mediates the impact of variety on co-creation
+
+    -   Variety → Satisfaction ( mediator ) → Co-creation
+
+This relationship is significant, meaning that higher professionalism leads to increased customer satisfaction, which in turn results in lower co-creation (since customer satisfaction has a negative impact on co-creation, -0.357).
+The same reasoning applies to variety.
+
+2.  For 'b' (affective commitment on Co-creation ), we have:
+
+-   bo : 'b ' represents Commitment and 'o' represents France .
+
+    -   France → Affective Commitmen( mediator ) → Co-creation
+
+-   bs: 'b ' represents Commitment and 's' for atmosphere.
+
+    -   Atmosphere → Affective Commitmen( mediator ) → Co-creation
+
+This relationship is significant, meaning that higher presence of French culture leads to increased customer affective commitment, which in turn results in higher co-creation .
+The same reasoning applies to atmosphere.
+
+3.  For 'c' (satisfaction on repurchase intention), we have:
+
+-   ce: Professionalism → Satisfaction ( mediator ) → Repurchase Intention
+-   ci: Variety → Satisfaction ( mediator ) → Repurchase Intention
+-   cl: Decoration→ Satisfaction ( mediator ) → Repurchase Intention
+
+All three have significant indirect effects on repurchase intention through satisfaction, with professionalism and variety having positive estimates, while decoration has a negative estimate.
+
+4.  For 'd' (commitment on repurchase intention), we have:
+
+-   do: France → Affective Commitmen( mediator ) → Repurchase Intention
+
+-   ds: Atmosphere→ Affective Commitmen( mediator ) → Repurchase Intention
+
+Both have significant indirect effects on repurchase intention through commitment, resulting in positive impacts on repurchase intention.
+
+# Question 3 
+
+## What is driving the two distinct outcomes? Which image dimensions have the largest total effect on each of them?
+
+Two distinct outcomes, co-creation and repurchase intention, are driven by different factors.
+Both satisfaction and affective commitment influence repurchase intention and co-creation, although their magnitudes differ.
+
+![](images/GSEM_AD3M_2023_Case%20Study_Galeries%20Lafayette-10%202.jpg)
+
+\# Total effects ( := TE)
+
+\# for cocreation
+
+**TE7C**:= aa + (a\*k) + (b\*s)
+
+\# for repurchase
+
+**TE7R**:= ii + (c\*k) + (d\*s)
+
+\# total indirect effect (:= TIE)
+
+\# for cocreation
+
+**TIE3C**:= (a\*g) + (b\*o)
+
+**TIE7C**:= (a\*k) + (b\*s)
+
+\# for repurchase
+
+**TIE1R**:= (c\*e) + (d\*m)
+
+**TIE3R**:= (c\*g) + (d\*o)
+
+**TIE5R:**= (c\*i) + (d\*q)
+
+**TIE7R**:= (c\*k) + (d\*s)
+
+To identify which image dimensions have the largest total effect on each outcome, we can examine the defined parameter section.
+The total effects of **TE7R** and **TE7C** are the only significant ones, representing the image of atmosphere.
+Atmosphere has the largest total effect on repurchase intention and co-creation which are the most significant values.
+
+For significant indirect effects, we have the following:
+
+-   **TIE3C** : Indirect effects of France on co-creation
+
+-   **TIE7C** Image of atmosphere has indirect effect on co-creation (as expected, since its total effect is significant)
+
+-   **TIE1R**: Professionalism's indirect effect on repurchase intention
+
+-   **TIE3R** : Indirect effects of France on repurchase intention
+
+-   **TIE5R :** Indirect effects of variety on repurchase intention
+
+-   **TIE7R:** atmosphere indirect effect on repurchase intention
+
+In summary, atmosphere has the largest total effect on both commitment and repurchase intention.
+Additionally, significant indirect effects include France on co-creation and repurchase intention, variety on repurchase intention, and professionalism on repurchase intention.
